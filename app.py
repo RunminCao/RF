@@ -1,8 +1,6 @@
 import streamlit as st
 import joblib
-import shap
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 
 st.set_page_config(page_title="Predictors of recurrence after PTX", layout="wide")
