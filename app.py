@@ -38,11 +38,11 @@ feature_ranges = {
 }
 
 # Page configuration
-st.set_page_config(page_title="Postoperative Complication Predictor", layout="wide")
-st.title("Postoperative Early Complication Prediction Tool with SHAP Explanation")
+st.set_page_config(page_title="Predictors of recurrence after PTX", layout="wide")
+st.title("Predictive tool for recurrence after PTX and SHAP explanation")
 st.markdown("Please input the following **6** clinical parameters:")
 
-# Collect user inputs
+# Input UI
 feature_values = {}
 col1, col2 = st.columns(2)
 for i, (feature, props) in enumerate(feature_ranges.items()):
@@ -57,26 +57,22 @@ for i, (feature, props) in enumerate(feature_ranges.items()):
                 help=f"Range: {props['min']} - {props['max']}"
             )
         else:
-            selected_label = st.selectbox(
-                label=f"{feature}",
-                options=props["options"],
-                help="Surgical procedure type"
-            )
+            selected_label = st.selectbox(label=f"{feature}", options=props["options"])
             feature_values[feature] = props["mapping"][selected_label]
 
-# Create input DataFrame with correct feature order
+# Input DataFrame
 input_df = pd.DataFrame([[feature_values[f] for f in feature_names]], columns=feature_names)
 
-# Prediction and SHAP explanation
+# Predict
 if st.button("Run Prediction", type="primary"):
     with st.spinner("Calculating..."):
         try:
-            # Predict complication probability
+            # Prediction
             proba = model.predict_proba(input_df)[0]
             risk_prob = proba[1]
             prob_percent = risk_prob * 100
 
-            # Risk stratification
+            # Risk level
             low_th = 0.33
             high_th = 0.67
             if risk_prob < low_th:
@@ -89,19 +85,19 @@ if st.button("Run Prediction", type="primary"):
                 risk_level = "🔴 High Risk"
                 risk_color = "red"
 
-            # Display results
+            # Show result
             st.subheader("Prediction Results")
-            col_res1, col_res2 = st.columns(2)
-            with col_res1:
-                st.markdown(f"### Complication Risk Level: <span style='color:{risk_color}'>{risk_level}</span>", unsafe_allow_html=True)
-            with col_res2:
-                st.metric("Probability of Complication", f"{prob_percent:.2f}%")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"### Risk Level: <span style='color:{risk_color}'>{risk_level}</span>", unsafe_allow_html=True)
+            with c2:
+                st.metric("Complication Probability", f"{prob_percent:.2f}%")
 
-            # SHAP Force Plot
+            # SHAP Plot
             st.subheader("Prediction Interpretation (SHAP Force Plot)")
-            st.markdown("The figure shows the contribution of each feature to the prediction: **red** increases risk, **blue** decreases risk.")
+            st.markdown("Red features increase risk; blue features reduce risk.")
 
-            # Extract model components
+            # Get model
             if hasattr(model, "named_steps") and "rf" in model.named_steps:
                 rf_model = model.named_steps["rf"]
                 preprocessor = model.named_steps.get("preprocessor", None)
@@ -109,7 +105,7 @@ if st.button("Run Prediction", type="primary"):
                 rf_model = model
                 preprocessor = None
 
-            # Preprocess input data
+            # Preprocess
             if preprocessor is not None:
                 X_input = preprocessor.transform(input_df)
                 if hasattr(X_input, "toarray"):
@@ -117,33 +113,32 @@ if st.button("Run Prediction", type="primary"):
             else:
                 X_input = input_df.values
 
-            # Compute SHAP values
+            # SHAP values
             explainer = shap.TreeExplainer(rf_model)
             shap_values = explainer.shap_values(X_input)
 
-            # Extract SHAP values for positive class (complication)
+            # Get positive class SHAP
             if isinstance(shap_values, list):
-                shap_values_class1 = shap_values[1][0]
+                sv = shap_values[1][0]
             else:
-                shap_values_class1 = shap_values[0, :, 1]
+                sv = shap_values[0, :, 1]
+
+            # Base value
+            ev = explainer.expected_value
+            base_val = ev[1] if isinstance(ev, (list, np.ndarray)) else ev
 
             # Clean feature names
             if preprocessor is not None and hasattr(preprocessor, "get_feature_names_out"):
-                raw_names = preprocessor.get_feature_names_out()
-                clean_names = [re.sub(r'^(num|cat)_+', '', n).lstrip('_') for n in raw_names]
+                names = preprocessor.get_feature_names_out()
+                clean_names = [re.sub(r'^(num|cat)_+', '', n).strip('_') for n in names]
             else:
                 clean_names = feature_names
 
-            # Base value
-            expected_value = explainer.expected_value
-            base_value = expected_value[1] if isinstance(expected_value, list) else expected_value
-
-            # Generate SHAP force plot
-            shap.initjs()
+            # -------------------------- 关键修复：删除 initjs() --------------------------
             fig = plt.figure(figsize=(14, 4))
             shap.force_plot(
-                base_value,
-                shap_values_class1,
+                base_val,
+                sv,
                 X_input[0],
                 feature_names=clean_names,
                 matplotlib=True,
@@ -153,9 +148,8 @@ if st.button("Run Prediction", type="primary"):
             st.pyplot(fig)
             plt.close(fig)
 
-            # Global feature importance
-            with st.expander("Global Feature Importance (Mean |SHAP Value|)"):
-                st.info("Full global SHAP analysis can be included during model training.")
+            with st.expander("Global Feature Importance"):
+                st.info("Mean absolute SHAP values represent overall feature impact.")
 
         except Exception as e:
-            st.error(f"Error during prediction: {str(e)}")
+            st.error(f"Error: {str(e)}")
