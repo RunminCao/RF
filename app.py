@@ -4,7 +4,6 @@ import shap
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import re
 
 st.set_page_config(page_title="Predictors of recurrence after PTX", layout="wide")
 
@@ -25,18 +24,18 @@ feature_names = [
     "P_T0"
 ]
 
-# Feature input ranges
+# Feature input ranges (ALL float type to avoid Streamlit error)
 feature_ranges = {
     "Operation method": {
         "type": "categorical",
         "options": ["SPTX (0)", "TPTX (1)", "TPTX+AT (2)"],
         "mapping": {"SPTX (0)": 0, "TPTX (1)": 1, "TPTX+AT (2)": 2}
     },
-    "iPTH_T1": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 1.0},
-    "iPTH_T2": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 1.0},
-    "TPV": {"type": "numerical", "min": 0.0, "max": 10.0, "default": 1.0, "step": 0.1},
-    "BonePain": {"type": "numerical", "min": 0.0, "max": 10.0, "default": 0.0, "step": 1},
-    "P_T0": {"type": "numerical", "min": 0.0, "max": 20.0, "default": 3.0, "step": 0.1},
+    "iPTH_T1": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 5.0},
+    "iPTH_T2": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 5.0},
+    "TPV":     {"type": "numerical", "min": 0.0, "max": 10.0, "default": 1.0, "step": 0.1},
+    "BonePain":{"type": "numerical", "min": 0.0, "max": 10.0, "default": 0.0, "step": 0.5},
+    "P_T0":    {"type": "numerical", "min": 0.0, "max": 20.0, "default": 3.0, "step": 0.1},
 }
 
 # UI
@@ -46,20 +45,22 @@ st.markdown("Please input the following **6** clinical parameters:")
 # Get user inputs
 feature_values = {}
 col1, col2 = st.columns(2)
+
 for i, (feature, props) in enumerate(feature_ranges.items()):
     with col1 if i % 2 == 0 else col2:
         if props["type"] == "numerical":
             feature_values[feature] = st.number_input(
-                label=f"{feature}",
-                min_value=float(props["min"]),
-                max_value=float(props["max"]),
-                value=float(props["default"]),
+                label=feature,
+                min_value=props["min"],
+                max_value=props["max"],
+                value=props["default"],
                 step=props["step"]
             )
         else:
-            sel = st.selectbox(label=f"{feature}", options=props["options"])
+            sel = st.selectbox(label=feature, options=props["options"])
             feature_values[feature] = props["mapping"][sel]
 
+# Create input dataframe
 input_df = pd.DataFrame([[feature_values[f] for f in feature_names]], columns=feature_names)
 
 # Run prediction
@@ -70,7 +71,7 @@ if st.button("Run Prediction", type="primary"):
             risk_prob = proba[1]
             prob_percent = risk_prob * 100
 
-            # Risk stratification
+            # Risk level
             low_th = 0.33
             high_th = 0.67
             if risk_prob < low_th:
@@ -91,12 +92,12 @@ if st.button("Run Prediction", type="primary"):
                 st.metric("Recurrence Probability", f"{prob_percent:.2f}%")
 
             # ==============================
-            # SHAP 瀑布图 → 显示【原始输入值】
+            # SHAP Waterfall → SHOW ORIGINAL INPUT VALUES
             # ==============================
             st.subheader("Prediction Interpretation (SHAP Waterfall Plot)")
             st.markdown("Red = increases risk | Blue = decreases risk")
 
-            # Get model components
+            # Get model
             if hasattr(model, "named_steps"):
                 rf = model.named_steps["rf"]
                 pre = model.named_steps.get("preprocessor", None)
@@ -104,7 +105,7 @@ if st.button("Run Prediction", type="primary"):
                 rf = model
                 pre = None
 
-            # Get scaled values (for SHAP calculation)
+            # Scaled data for SHAP calculation
             if pre:
                 X_scaled = pre.transform(input_df)
                 if hasattr(X_scaled, "toarray"):
@@ -112,11 +113,10 @@ if st.button("Run Prediction", type="primary"):
             else:
                 X_scaled = input_df.values
 
-            # Calculate SHAP values
+            # SHAP values
             explainer = shap.TreeExplainer(rf)
             shap_values = explainer.shap_values(X_scaled)
 
-            # Get positive class SHAP
             if isinstance(shap_values, list):
                 sv = shap_values[1][0]
             else:
@@ -127,17 +127,17 @@ if st.button("Run Prediction", type="primary"):
             base_val = ev[1] if isinstance(ev, (list, np.ndarray)) else ev
 
             # ==============================
-            # 关键：强制使用【你输入的原始值】显示在图上
+            # KEY FIX: Show ORIGINAL input values (10, not 1.36)
             # ==============================
-            original_values = input_df.values[0]
+            original_data = input_df.values[0]
 
-            # 绘图
+            # Plot
             fig, ax = plt.subplots(figsize=(10, 6))
             shap.waterfall_plot(
                 shap.Explanation(
                     values=sv,
                     base_values=base_val,
-                    data=original_values,  # <-- 这里强制用原始值
+                    data=original_data,
                     feature_names=feature_names
                 ),
                 show=False
