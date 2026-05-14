@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 
-# 必须放在最开头
-plt.rcParams['font.family'] = 'DejaVu Sans'
+# 必须放在最前面
 st.set_page_config(page_title="Predictors of recurrence after PTX", layout="wide")
 
 # Load model
@@ -90,12 +89,11 @@ if st.button("Run Prediction", type="primary"):
                 st.metric("Recurrence Probability", f"{prob_percent:.2f}%")
 
             # --------------------------
-            # SHAP 修复核心部分
+            # SHAP Force Plot 正确写法
             # --------------------------
             st.subheader("Prediction Interpretation (SHAP Force Plot)")
             st.markdown("Red = increases risk | Blue = decreases risk")
 
-            # Get model
             if hasattr(model, "named_steps"):
                 rf = model.named_steps["rf"]
                 pre = model.named_steps.get("preprocessor", None)
@@ -103,7 +101,6 @@ if st.button("Run Prediction", type="primary"):
                 rf = model
                 pre = None
 
-            # Preprocess
             if pre:
                 X = pre.transform(input_df)
                 if hasattr(X, "toarray"):
@@ -111,32 +108,28 @@ if st.button("Run Prediction", type="primary"):
             else:
                 X = input_df.values
 
-            # Explainer
             explainer = shap.TreeExplainer(rf)
             sv = explainer.shap_values(X)
 
-            # 兼容二分类模型
             if isinstance(sv, list):
                 sv_pos = sv[1][0]
             else:
                 sv_pos = sv[0, :, 1]
 
-            # Base value
             ev = explainer.expected_value
             base = ev[1] if isinstance(ev, (list, np.ndarray)) else ev
 
-            # 固定SHAP画图，100%在Streamlit显示
-            fig, ax = plt.subplots(figsize=(14, 4))
+            # 正确版本：没有 ax= 参数
+            fig = plt.figure(figsize=(14, 4))
             shap.force_plot(
                 base,
                 sv_pos,
                 X[0],
                 feature_names=feature_names,
                 matplotlib=True,
-                show=False,
-                ax=ax
+                show=False
             )
-            st.pyplot(fig, clear_figure=True)
+            st.pyplot(fig)
             plt.close(fig)
 
         except Exception as e:
