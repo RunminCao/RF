@@ -39,7 +39,7 @@ feature_ranges = {
 }
 
 # UI
-st.title("Predictive tool for recurrence after PTX and SHAP explanation")
+st.title("Predictive tool for recurrence after PTX")
 st.markdown("Please input the following **6** clinical parameters:")
 
 # Get user inputs
@@ -91,60 +91,6 @@ if st.button("Run Prediction", type="primary"):
             with c2:
                 st.metric("Recurrence Probability", f"{prob_percent:.2f}%")
 
-            # ==============================
-            # SHAP Waterfall → SHOW ORIGINAL INPUT VALUES
-            # ==============================
-            st.subheader("Prediction Interpretation (SHAP Waterfall Plot)")
-            st.markdown("Red = increases risk | Blue = decreases risk")
-
-            # Get model
-            if hasattr(model, "named_steps"):
-                rf = model.named_steps["rf"]
-                pre = model.named_steps.get("preprocessor", None)
-            else:
-                rf = model
-                pre = None
-
-            # Scaled data for SHAP calculation
-            if pre:
-                X_scaled = pre.transform(input_df)
-                if hasattr(X_scaled, "toarray"):
-                    X_scaled = X_scaled.toarray()
-            else:
-                X_scaled = input_df.values
-
-            # SHAP values
-            explainer = shap.TreeExplainer(rf)
-            shap_values = explainer.shap_values(X_scaled)
-
-            if isinstance(shap_values, list):
-                sv = shap_values[1][0]
-            else:
-                sv = shap_values[0][:, 1]
-
-            # Base value
-            ev = explainer.expected_value
-            base_val = ev[1] if isinstance(ev, (list, np.ndarray)) else ev
-
-            # ==============================
-            # KEY FIX: Show ORIGINAL input values (10, not 1.36)
-            # ==============================
-            original_data = input_df.values[0]
-
-            # Plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            shap.waterfall_plot(
-                shap.Explanation(
-                    values=sv,
-                    base_values=base_val,
-                    data=original_data,
-                    feature_names=feature_names
-                ),
-                show=False
-            )
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
 
         except Exception as e:
             st.error(f"Error: {str(e)}")
