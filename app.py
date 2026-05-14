@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 
-# 放在最前面，避免 Streamlit 渲染问题
 st.set_page_config(page_title="Predictors of recurrence after PTX", layout="wide")
 
 # Load model
@@ -16,7 +15,7 @@ except FileNotFoundError:
     st.error("Model file 'rf.pkl' not found. Please upload the model file.")
     st.stop()
 
-# Feature names (must match the training data order)
+# Feature names (must match training order)
 feature_names = [
     "Operation method",
     "iPTH_T1",
@@ -26,25 +25,25 @@ feature_names = [
     "P_T0"
 ]
 
-# Feature input ranges and types
+# Feature input ranges
 feature_ranges = {
     "Operation method": {
         "type": "categorical",
         "options": ["SPTX (0)", "TPTX (1)", "TPTX+AT (2)"],
         "mapping": {"SPTX (0)": 0, "TPTX (1)": 1, "TPTX+AT (2)": 2}
     },
-    "iPTH_T1": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 5.0},
-    "iPTH_T2": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 5.0},
-    "TPV":     {"type": "numerical", "min": 0.0, "max": 10.0, "default": 1.0, "step": 0.1},
-    "BonePain": {"type": "numerical", "min": 0.0, "max": 10.0, "default": 0.0, "step": 0.5},
-    "P_T0":    {"type": "numerical", "min": 0.0, "max": 20.0, "default": 3.0, "step": 0.1},
+    "iPTH_T1": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 1.0},
+    "iPTH_T2": {"type": "numerical", "min": 0.0, "max": 5000.0, "default": 100.0, "step": 1.0},
+    "TPV": {"type": "numerical", "min": 0.0, "max": 10.0, "default": 1.0, "step": 0.1},
+    "BonePain": {"type": "numerical", "min": 0.0, "max": 10.0, "default": 0.0, "step": 1},
+    "P_T0": {"type": "numerical", "min": 0.0, "max": 20.0, "default": 3.0, "step": 0.1},
 }
 
-# Page UI
+# UI
 st.title("Predictive tool for recurrence after PTX and SHAP explanation")
 st.markdown("Please input the following **6** clinical parameters:")
 
-# Input UI
+# Get user inputs
 feature_values = {}
 col1, col2 = st.columns(2)
 for i, (feature, props) in enumerate(feature_ranges.items()):
@@ -55,97 +54,91 @@ for i, (feature, props) in enumerate(feature_ranges.items()):
                 min_value=float(props["min"]),
                 max_value=float(props["max"]),
                 value=float(props["default"]),
-                step=props.get("step", 1.0),
-                help=f"Range: {props['min']} - {props['max']}"
+                step=props["step"]
             )
         else:
-            selected_label = st.selectbox(label=f"{feature}", options=props["options"])
-            feature_values[feature] = props["mapping"][selected_label]
+            sel = st.selectbox(label=f"{feature}", options=props["options"])
+            feature_values[feature] = props["mapping"][sel]
 
-# Input DataFrame
 input_df = pd.DataFrame([[feature_values[f] for f in feature_names]], columns=feature_names)
 
-# Predict
+# Run prediction
 if st.button("Run Prediction", type="primary"):
     with st.spinner("Calculating..."):
         try:
-            # Prediction
             proba = model.predict_proba(input_df)[0]
             risk_prob = proba[1]
             prob_percent = risk_prob * 100
 
-            # Risk level
+            # Risk stratification
             low_th = 0.33
             high_th = 0.67
             if risk_prob < low_th:
                 risk_level = "🔵 Low Risk"
-                risk_color = "blue"
+                color = "blue"
             elif risk_prob < high_th:
                 risk_level = "🟡 Moderate Risk"
-                risk_color = "orange"
+                color = "orange"
             else:
                 risk_level = "🔴 High Risk"
-                risk_color = "red"
+                color = "red"
 
-            # Show result
             st.subheader("Prediction Results")
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown(f"### Risk Level: <span style='color:{risk_color}'>{risk_level}</span>", unsafe_allow_html=True)
+                st.markdown(f"### Risk Level: <span style='color:{color}'>{risk_level}</span>", unsafe_allow_html=True)
             with c2:
                 st.metric("Recurrence Probability", f"{prob_percent:.2f}%")
 
-            # --------------------------
-            # 改用 Waterfall Plot（100%能在Streamlit显示）
-            # --------------------------
+            # ==============================
+            # SHAP 瀑布图 → 显示【原始输入值】
+            # ==============================
             st.subheader("Prediction Interpretation (SHAP Waterfall Plot)")
-            st.markdown("Red = increases risk; Blue = decreases risk.")
+            st.markdown("Red = increases risk | Blue = decreases risk")
 
-            # Get model
-            if hasattr(model, "named_steps") and "rf" in model.named_steps:
-                rf_model = model.named_steps["rf"]
-                preprocessor = model.named_steps.get("preprocessor", None)
+            # Get model components
+            if hasattr(model, "named_steps"):
+                rf = model.named_steps["rf"]
+                pre = model.named_steps.get("preprocessor", None)
             else:
-                rf_model = model
-                preprocessor = None
+                rf = model
+                pre = None
 
-            # Preprocess
-            if preprocessor is not None:
-                X_input = preprocessor.transform(input_df)
-                if hasattr(X_input, "toarray"):
-                    X_input = X_input.toarray()
+            # Get scaled values (for SHAP calculation)
+            if pre:
+                X_scaled = pre.transform(input_df)
+                if hasattr(X_scaled, "toarray"):
+                    X_scaled = X_scaled.toarray()
             else:
-                X_input = input_df.values
+                X_scaled = input_df.values
 
-            # SHAP values
-            explainer = shap.TreeExplainer(rf_model)
-            shap_values = explainer.shap_values(X_input)
+            # Calculate SHAP values
+            explainer = shap.TreeExplainer(rf)
+            shap_values = explainer.shap_values(X_scaled)
 
             # Get positive class SHAP
             if isinstance(shap_values, list):
                 sv = shap_values[1][0]
             else:
-                sv = shap_values[0, :, 1]
+                sv = shap_values[0][:, 1]
 
             # Base value
             ev = explainer.expected_value
             base_val = ev[1] if isinstance(ev, (list, np.ndarray)) else ev
 
-            # Clean feature names
-            if preprocessor is not None and hasattr(preprocessor, "get_feature_names_out"):
-                names = preprocessor.get_feature_names_out()
-                clean_names = [re.sub(r'^(num|cat)_+', '', n).strip('_') for n in names]
-            else:
-                clean_names = feature_names
+            # ==============================
+            # 关键：强制使用【你输入的原始值】显示在图上
+            # ==============================
+            original_values = input_df.values[0]
 
-            # Waterfall Plot（稳定兼容Streamlit）
+            # 绘图
             fig, ax = plt.subplots(figsize=(10, 6))
             shap.waterfall_plot(
                 shap.Explanation(
                     values=sv,
                     base_values=base_val,
-                    data=X_input[0],
-                    feature_names=clean_names
+                    data=original_values,  # <-- 这里强制用原始值
+                    feature_names=feature_names
                 ),
                 show=False
             )
